@@ -1,0 +1,11 @@
+[package]
+name = "stdintap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+bytes = "1.6.1"
+clap = { version = "4.5.9", default-features = false, features = ["derive", "help", "std"] }
+tokio = { version = "1.38.1", features = ["rt", "macros", "sync", "net", "io-util", "time"] }
+tokio-listener = { version = "0.4.3", default-features = false, features = ["clap", "sd_listen", "socket_options", "unix", "unix_path_tools", "multi-listener"] }
