@@ -57,6 +57,10 @@ struct Args {
     /// Separata lines by zero byte instead of \n
     #[clap(long)]
     zero_separated: bool,
+
+    /// Also copy stdin to stdout
+    #[clap(long, short='T')]
+    tee: bool,
 }
 
 #[derive(Clone)]
@@ -112,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
         hello_message,
         max_line_size,
         zero_separated,
+        tee,
     } = Args::parse();
 
     if qlen < 2 && backpressure {
@@ -132,7 +137,15 @@ async fn main() -> anyhow::Result<()> {
         let mut si = si.lock();
         let tx = tx2;
 
-        let mut buf = BytesMut::with_capacity(8192);
+        let so_;
+        let mut so = if tee {
+            so_ = std::io::stdout();
+            Some(so_.lock())
+        } else {
+            None
+        };
+
+        let mut buf = BytesMut::with_capacity(8192*2);
 
         let mut noticed_about_nonblocking_stdin = false;
         let mut debt = 0usize;
@@ -163,6 +176,12 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
             };
+            if let Some(ref mut so) = so {
+                if std::io::Write::write_all(so, &buf[debt..(debt+n)]).is_err() {
+                    eprintln!("Writing to stdout failed");
+                    break;
+                }
+            }
             let mut n = n;
 
             assert!(buf.len() >= debt + n);
