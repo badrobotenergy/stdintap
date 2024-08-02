@@ -77,6 +77,7 @@ Advanced options
 | FFFFFFFFFFFFFFF
 | GGGGGGGGGGGGGGG
 |                   | $ fg
+|                   | 333333333333333
 |                   | 444444444444444
 |                   | 555555555555555
 |                   | 666666666666666
