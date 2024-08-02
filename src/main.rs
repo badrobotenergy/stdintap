@@ -1,6 +1,8 @@
 use std::{
+    collections::VecDeque,
     io::{ErrorKind, Read},
     pin::Pin,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -47,6 +49,8 @@ struct Args {
     timestamps: bool,
 
     /// Inject initial message at the beginning of each client connection
+    ///
+    /// With --history option, the hello message appears after the history, before the "online" content.
     #[clap(long, short = 'H')]
     hello_message: bool,
 
@@ -65,6 +69,10 @@ struct Args {
     /// Print sequence numbers of lines
     #[clap(long)]
     seqn: bool,
+
+    /// Remember and this number of lines and replay them to each connecting client
+    #[clap(long)]
+    history: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -123,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         zero_separated,
         tee,
         seqn: print_seqn,
+        history,
     } = Args::parse();
 
     if qlen < 2 && backpressure {
@@ -137,6 +146,14 @@ async fn main() -> anyhow::Result<()> {
     let begin = Instant::now();
     let byte_to_look_at = if zero_separated { b'\0' } else { b'\n' };
     let separator_char = if zero_separated { '\0' } else { '\n' };
+
+    let history_buffer = if let Some(hl) = history {
+        Some((hl, Arc::new(Mutex::new(VecDeque::<Msg>::with_capacity(hl)))))
+    } else {
+        None
+    };
+    let history_buffer2 = history_buffer.clone();
+
     std::thread::spawn(move || {
         let _shutdown_tx = shutdown_tx;
         let si = std::io::stdin();
@@ -151,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
             None
         };
 
+        let history_buffer = history_buffer2;
         let mut buf = BytesMut::with_capacity(8192 * 2);
 
         let mut noticed_about_nonblocking_stdin = false;
@@ -207,6 +225,14 @@ async fn main() -> anyhow::Result<()> {
                             seqn,
                         };
 
+                        if let Some((hl, ref hb)) = history_buffer {
+                            let mut hb = hb.lock().unwrap();
+                            if hb.len() >= hl {
+                                hb.pop_front();
+                            }
+                            hb.push_back(content_msg.clone());
+                        }
+
                         if !backpressure || tx.len() < qlen - 1 {
                             let _ = tx.send(content_msg);
                         } else {
@@ -254,6 +280,7 @@ async fn main() -> anyhow::Result<()> {
             break;
         };
         let mut rx = tx.subscribe();
+        let history_buffer = history_buffer.clone();
 
         tokio::task::spawn(async move {
             let ret: anyhow::Result<()> = async move {
@@ -262,6 +289,34 @@ async fn main() -> anyhow::Result<()> {
                 let mut tsprinter = TimestampPrinter::new(begin);
 
                 let mut overrun_counter = 0;
+
+                let mut minseqn = 0;
+
+                if let Some((_, ref hb)) = history_buffer {
+                    let mut history_copy: VecDeque<Msg>;
+                    {
+                        let hb = hb.lock().unwrap();
+                        history_copy = hb.clone();
+                        // unlock
+                    }
+
+                    while let Some(msg) = history_copy.pop_front() {
+                        let MsgInner::Content(buf) = msg.inner else {
+                            continue
+                        };
+                        if timestamps {
+                            tsprinter.print(conn.as_mut(), msg.ts, '\t').await?;
+                        }
+                        if print_seqn {
+                            let mut buf = String::with_capacity(8);
+                            let _ = write!(buf, "{}\t", msg.seqn,);
+                            conn.as_mut().write_all(buf.as_bytes()).await?;
+                        }
+                        conn.as_mut().write_all(&buf).await?;
+                        minseqn=msg.seqn+1;
+                    }
+                    conn.as_mut().flush().await?;
+                }
 
                 if hello_message {
                     if timestamps {
@@ -276,6 +331,9 @@ async fn main() -> anyhow::Result<()> {
                 loop {
                     match rx.recv().await {
                         Ok(msg) => {
+                            if msg.seqn < minseqn {
+                                continue;
+                            }
                             match msg.inner {
                                 MsgInner::Content(b) => {
                                     if announce_overruns && overrun_counter > 0 {
