@@ -11,6 +11,87 @@ Read lines from stdin and copy them to all connected clients.
 * Optional printing of timestamps (using monotonic timer) and sequence numbers.
 * Maximum line size is limited (adjustable). You can use zero byte instead of newline if needed.
 * You can request content to be also forwarded to stdout.
+* Reasonable performance.
+
+## Examples
+
+Simple
+
+```
+| $ stdintap 127.0.0.1:1234
+| A
+| B
+| C    | $ nc 127.0.0.1 1234
+| D    | D
+| E    | E
+| F    | F    | $ nc 127.0.0.1 1234
+| G    | G    | G
+| H    | ^C   | H
+| I    | $    | I
+| J           | J
+...
+```
+
+Advanced options
+
+```
+| $ stdintap @qqq -x -H --history 2 -t --seqn
+| a
+| b
+| c
+| d
+| e   
+|     | $ socat - abstract:qqq
+|     | 000004.000452   3       d
+|     | 000006.000780   4       e
+|     | 000012.000967 HELLO
+| f   | 000085.000356   5       f
+| g   | 000090.000084   6       g
+| ^D  | 000134.000408 EOF
+| $   | $
+```
+
+<details><summary> Overrun announcements </summary>
+
+```
+| $ stdintap @qqq -x --qlen 1 --send-buffer-size 16
+|                   | $ socat - abstract:qqq,rcvbuf=16
+| 000000000000000   | 000000000000000
+| 111111111111111   | 111111111111111
+| 222222222222222   | 222222222222222
+|                   | ^Z
+|                   | [1]+  Stopped
+|                   | $
+| 333333333333333
+| 444444444444444
+| 555555555555555
+| 666666666666666
+| 777777777777777
+| 888888888888888
+| 999999999999999
+| AAAAAAAAAAAAAAA
+| BBBBBBBBBBBBBBB
+| CCCCCCCCCCCCCCC
+| DDDDDDDDDDDDDDD
+| EEEEEEEEEEEEEEE
+| FFFFFFFFFFFFFFF
+| GGGGGGGGGGGGGGG
+|                   | $ fg
+|                   | 444444444444444
+|                   | 555555555555555
+|                   | 666666666666666
+|                   | 777777777777777
+|                   | 888888888888888
+|                   | 999999999999999
+|                   | AAAAAAAAAAAAAAA
+|                   | OVERRUN 5
+|                   | GGGGGGGGGGGGGGG
+| HHHHHHHHHHHHHHH   | HHHHHHHHHHHHHHH
+| ^D                | EOF
+| $                 | $
+```
+
+</details>
 
 ## Installation
 
