@@ -59,7 +59,7 @@ struct Args {
     max_line_size: usize,
 
     /// Separata lines by zero byte instead of \n
-    #[clap(long)]
+    #[clap(long, short='0')]
     zero_separated: bool,
 
     /// Also copy stdin to stdout

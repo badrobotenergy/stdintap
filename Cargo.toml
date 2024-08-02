@@ -2,6 +2,11 @@
 name = "stdintap"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/vi/stdintap"
+license = "MIT OR Apache-2.0"
+description = "CLI tool to read lines from stdin and broadcast them to connected TCP clients"
+categories = ["network-programming", "command-line-utilities"]
+keywords = ["stdio", "stdin", "tcp", "unix", "text"]
 
 [dependencies]
 anyhow = "1.0.86"
