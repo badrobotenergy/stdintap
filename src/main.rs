@@ -116,7 +116,7 @@ impl TimestampPrinter {
     ) -> std::io::Result<()> {
         let x = ts - self.begin;
         let s = x.as_secs();
-        let m = x.subsec_millis();
+        let m = x.subsec_micros();
         self.buf.clear();
         let _ = write!(self.buf, "{s:06}.{m:06}{sep}");
         conn.write_all(self.buf.as_bytes()).await
