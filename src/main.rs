@@ -73,6 +73,12 @@ struct Args {
     /// Remember and this number of lines and replay them to each connecting client
     #[clap(long)]
     history: Option<usize>,
+
+    /// Don't read from stdin unless at least one client is connected.
+    /// 
+    /// Does not gurantee lack of dropped lines on disconnections.
+    #[clap(long)]
+    require_observer: bool,
 }
 
 #[derive(Clone)]
@@ -132,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
         tee,
         seqn: print_seqn,
         history,
+        require_observer,
     } = Args::parse();
 
     if qlen < 2 && backpressure {
@@ -177,6 +184,13 @@ async fn main() -> anyhow::Result<()> {
         loop {
             buf.reserve((8192 + debt).saturating_sub(buf.capacity()));
             buf.resize(buf.capacity(), 0);
+
+            if require_observer {
+                if tx.receiver_count() == 0 {
+                    std::thread::sleep(Duration::from_millis(200));
+                    continue
+                }
+            }
 
             let n = match si.read(&mut buf[debt..]) {
                 Ok(0) => break,
