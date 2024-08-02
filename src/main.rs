@@ -59,8 +59,12 @@ struct Args {
     zero_separated: bool,
 
     /// Also copy stdin to stdout
-    #[clap(long, short='T')]
+    #[clap(long, short = 'T')]
     tee: bool,
+
+    /// Print sequence numbers of lines
+    #[clap(long)]
+    seqn: bool,
 }
 
 #[derive(Clone)]
@@ -74,6 +78,7 @@ enum MsgInner {
 struct Msg {
     ts: Instant,
     inner: MsgInner,
+    seqn: u64,
 }
 
 struct TimestampPrinter {
@@ -117,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
         max_line_size,
         zero_separated,
         tee,
+        seqn: print_seqn,
     } = Args::parse();
 
     if qlen < 2 && backpressure {
@@ -145,10 +151,11 @@ async fn main() -> anyhow::Result<()> {
             None
         };
 
-        let mut buf = BytesMut::with_capacity(8192*2);
+        let mut buf = BytesMut::with_capacity(8192 * 2);
 
         let mut noticed_about_nonblocking_stdin = false;
         let mut debt = 0usize;
+        let mut seqn = 0u64;
         loop {
             buf.reserve((8192 + debt).saturating_sub(buf.capacity()));
             buf.resize(buf.capacity(), 0);
@@ -177,7 +184,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             if let Some(ref mut so) = so {
-                if std::io::Write::write_all(so, &buf[debt..(debt+n)]).is_err() {
+                if std::io::Write::write_all(so, &buf[debt..(debt + n)]).is_err() {
                     eprintln!("Writing to stdout failed");
                     break;
                 }
@@ -194,15 +201,19 @@ async fn main() -> anyhow::Result<()> {
 
                         let ts = Instant::now();
 
+                        let content_msg = Msg {
+                            ts,
+                            inner: MsgInner::Content(content),
+                            seqn,
+                        };
+
                         if !backpressure || tx.len() < qlen - 1 {
-                            let _ = tx.send(Msg {
-                                ts,
-                                inner: MsgInner::Content(content),
-                            });
+                            let _ = tx.send(content_msg);
                         } else {
                             let _ = tx.send(Msg {
                                 ts,
                                 inner: MsgInner::Backpressure,
+                                seqn,
                             });
                             let mut wait_micros = 1;
                             while tx.len() >= qlen - 1 {
@@ -211,11 +222,9 @@ async fn main() -> anyhow::Result<()> {
                                     wait_micros *= 2;
                                 }
                             }
-                            let _ = tx.send(Msg {
-                                ts,
-                                inner: MsgInner::Content(content),
-                            });
+                            let _ = tx.send(content_msg);
                         }
+                        seqn += 1;
 
                         continue 'restarter;
                     }
@@ -229,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
         let _ = tx.send(Msg {
             ts: Instant::now(),
             inner: MsgInner::Eof,
+            seqn,
         });
     });
 
@@ -284,6 +294,11 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                     if timestamps {
                                         tsprinter.print(conn.as_mut(), msg.ts, '\t').await?;
+                                    }
+                                    if print_seqn {
+                                        let mut buf = String::with_capacity(8);
+                                        let _ = write!(buf, "{}\t", msg.seqn,);
+                                        conn.as_mut().write_all(buf.as_bytes()).await?;
                                     }
                                     conn.as_mut().write_all(&b).await?;
                                 }
